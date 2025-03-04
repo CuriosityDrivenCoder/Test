@@ -92,7 +92,7 @@ def cluster_and_score(branch_data, var_list, scale_val, num_of_cluster, ratios, 
     
     return branch_data
 
-def manipulate_clusters(branch_data, var_3, num_of_cluster, alt_limit=0.1, ust_limit=0.25):
+def manipulate_clusters(branch_data, var_3, num_of_cluster, ratios, alt_limit=0.1, ust_limit=0.25):
     """Manipulate clusters based on limits"""
     recluster = pd.DataFrame({
         "VARIABLE": var_3,
@@ -193,7 +193,7 @@ def main():
     branch_data = cluster_and_score(branch_data, var_3, scale_val, num_of_cluster, ratios)
     
     var_skor = [var + '_SKOR' for var in var_3]
-    recluster = manipulate_clusters(branch_data, var_3, num_of_cluster)
+    recluster = manipulate_clusters(branch_data, var_3, num_of_cluster, ratios)
     data2 = apply_manipulation(branch_data, recluster, var_3)
     
     branch_data_2 = data2.copy()
