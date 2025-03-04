@@ -167,7 +167,7 @@ def apply_manipulation(branch_data, recluster, var_3):
     
     return data2
 
-def final_scoring(branch_data, var_3, var_skor, ratios, coefficients):
+def final_scoring(branch_data, var_3, var_skor, coefficients):
     """Calculate final model score"""
     mmscaler = MinMaxScaler()
     olck_degler = []
@@ -205,7 +205,7 @@ def main():
     branch_data = cluster_and_score(branch_data, var_3, scale_val_2, num_of_cluster, ratios)
     
     coefficients = [12, 12, 10, 6, 4, 3, 3, 3, 3, 4, 3, 3, 3, 3, 3, 4, 3, 4, 3, 4, 4, 3]
-    branch_data, olck_degler = final_scoring(branch_data, var_3, var_skor, ratios, coefficients)
+    branch_data, olck_degler = final_scoring(branch_data, var_3, var_skor, coefficients)
     
     branch_data_2 = branch_data.copy()
     skor_column = [r + '_SCORE' for r in var_3]
