@@ -30,7 +30,6 @@ def get_data_from_db():
 
 def prepare_data(df):
     """Data preparation and scaling"""
-    data_date = df["DATA_DATE"]
     df = df.drop(columns=['DATA_DATE'])
     branch_data = df.rename(columns={'PARTY_ID': 'KOD'}).copy()
     var_3 = list(branch_data.columns)[1:]
@@ -137,7 +136,8 @@ def manipulate_clusters(branch_data, var_3, num_of_cluster, ratios, alt_limit=0.
                         else:
                             recluster.loc[recluster.VARIABLE==x,"CLUSTER_NO"]=i
                         break
-    recluster.loc[recluster.VARIABLE=="NOF_RANCH_IN_MICRO_MARKET","IS_MANUPULATED"]=0 
+    # Fix the typo: NOF_RANCH_IN_MICRO_MARKET -> NOF_BRANCH_IN_MICRO_MARKET
+    recluster.loc[recluster.VARIABLE=="NOF_BRANCH_IN_MICRO_MARKET","IS_MANUPULATED"]=0 
     recluster.loc[recluster.VARIABLE=="COMPETITOR_STATE_ID","IS_MANUPULATED"]=0      
     
     return recluster
@@ -163,6 +163,82 @@ def apply_manipulation(branch_data, recluster, var_3):
                     data2[x] = data2[x].apply(lambda j: data2[x].min() / 100 if j <= max_value else j)
                 else:
                     min_value = data2[data2[y] <= cluster_no][x].min()
+                    data2[x] = data2[x].apply(lambda j: data2[x].max() * 100 if j >= min_value else j)
+    
+    return data2
+
+def manipulate_clusters_second_phase(branch_data, var_3, num_of_cluster, ratios, b_alt_limit=0.05, b_ust_limit=0.1):
+    """Second manipulation phase for clusters"""
+    b_recluster = pd.DataFrame({
+        "VARIABLE": var_3,
+        "RATIOS": ratios,
+        "IS_MANUPULATED": np.zeros(len(ratios)),
+        "CLUSTER_NO": np.zeros(len(ratios)),
+        "SEMI_CLUSTER": np.zeros(len(ratios))
+    })
+    
+    for x in var_3:
+        if x == 'BIR_KM_YKB':
+            continue
+            
+        mem_rat = 0
+        for i in range(num_of_cluster[x] - 1, -1, -1):
+            current_ratio = branch_data[branch_data[x + '_SKOR'] == i].KOD.count() / branch_data.KOD.count()
+            
+            if i == num_of_cluster[x] - 1:
+                if current_ratio >= b_alt_limit:
+                    break
+                else:
+                    mem_rat += current_ratio
+            else:
+                if mem_rat < b_alt_limit:
+                    mem_rat += current_ratio
+                if mem_rat >= b_ust_limit:
+                    b_recluster.loc[b_recluster.VARIABLE == x, ["IS_MANUPULATED", "CLUSTER_NO", "SEMI_CLUSTER"]] = [1, i if i != 0 else i + 1, 1]
+                    break
+                elif mem_rat >= b_alt_limit:
+                    b_recluster.loc[b_recluster.VARIABLE == x, ["IS_MANUPULATED", "CLUSTER_NO"]] = [1, i if i != 0 else i + 1]
+                    break
+    
+    b_recluster.loc[b_recluster.VARIABLE.isin(["NOF_BRANCH_IN_MICRO_MARKET", "COMPETITOR_STATE_ID"]), "IS_MANUPULATED"] = 0
+    
+    return b_recluster
+
+def apply_both_manipulations(branch_data, recluster, b_recluster, var_3):
+    """Apply both manipulation phases to the data"""
+    data2 = branch_data.copy()
+    for x in var_3:
+        y = x + "_SKOR"
+        recluster_x = recluster[recluster.VARIABLE == x]
+        b_recluster_x = b_recluster[b_recluster.VARIABLE == x]
+        
+        # First manipulation (repeated)
+        if recluster_x.IS_MANUPULATED.values == 1:
+            if not recluster_x.RATIOS.values:
+                min_value = data2[data2[y] == 0][x].min()
+                data2[x] = data2[x].apply(lambda j: data2[x].max() * 100 if j >= min_value else j)
+            else:
+                max_value = data2[data2[y] == 0][x].max()
+                data2[x] = data2[x].apply(lambda j: data2[x].min() / 100 if j <= max_value else j)
+        
+        # Second manipulation
+        if b_recluster_x.IS_MANUPULATED.values == 1:
+            cluster_no = int(b_recluster_x.CLUSTER_NO)
+            is_ratio = b_recluster_x.RATIOS.values
+            semi_cluster = b_recluster_x.SEMI_CLUSTER.values == 1
+            
+            if semi_cluster:
+                mean_value = data2[data2[y] == cluster_no][x].mean()
+                if not is_ratio:
+                    data2[x] = data2[x].apply(lambda j: data2[x].min() / 100 if j <= mean_value else j)
+                else:
+                    data2[x] = data2[x].apply(lambda j: data2[x].max() * 100 if j >= mean_value else j)
+            else:
+                if not is_ratio:
+                    max_value = data2[data2[y] >= cluster_no][x].max()
+                    data2[x] = data2[x].apply(lambda j: data2[x].min() / 100 if j <= max_value else j)
+                else:
+                    min_value = data2[data2[y] >= cluster_no][x].min()
                     data2[x] = data2[x].apply(lambda j: data2[x].max() * 100 if j >= min_value else j)
     
     return data2
@@ -193,20 +269,40 @@ def main():
     branch_data = cluster_and_score(branch_data, var_3, scale_val, num_of_cluster, ratios)
     
     var_skor = [var + '_SKOR' for var in var_3]
+    
+    # First manipulation phase
     recluster = manipulate_clusters(branch_data, var_3, num_of_cluster, ratios)
     data2 = apply_manipulation(branch_data, recluster, var_3)
     
+    # Prepare for reclustering
     branch_data_2 = data2.copy()
     for x in var_skor:
         branch_data_2 = branch_data_2.drop(x, axis=1)
         branch_data = branch_data.drop(x, axis=1)
     
+    # Reapply scaling and clustering
     scale_val_2 = StandardScaler().fit_transform(branch_data_2[var_3])
     branch_data = cluster_and_score(branch_data, var_3, scale_val_2, num_of_cluster, ratios)
     
+    # Second manipulation phase - ADDED THIS SECTION
+    b_recluster = manipulate_clusters_second_phase(branch_data, var_3, num_of_cluster, ratios)
+    data2 = apply_both_manipulations(branch_data, recluster, b_recluster, var_3)
+    
+    # Final clustering preparation  
+    branch_data_2 = data2.copy()
+    for x in var_skor:
+        branch_data_2 = branch_data_2.drop(x, axis=1)
+        branch_data = branch_data.drop(x, axis=1)
+    
+    # Final clustering and scoring
+    scale_val_2 = StandardScaler().fit_transform(branch_data_2[var_3])
+    branch_data = cluster_and_score(branch_data, var_3, scale_val_2, num_of_cluster, ratios)
+    
+    # Calculate final scores with weights
     coefficients = [12, 12, 10, 6, 4, 3, 3, 3, 3, 4, 3, 3, 3, 3, 3, 4, 3, 4, 3, 4, 4, 3]
     branch_data, olck_degler = final_scoring(branch_data, var_3, var_skor, coefficients)
     
+    # Prepare final result dataframe
     branch_data_2 = branch_data.copy()
     skor_column = [r + '_SCORE' for r in var_3]
     
